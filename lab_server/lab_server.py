@@ -70,7 +70,7 @@ class Operation:
 
     def post(self):
         response = requests.post(
-            url=f'{LOG_SERVER_URL}/operations/',
+            url=f'{LOG_SERVER_URL}/api/operations/',
             data={
                 "process_id": self.process_db_id,
                 "name": self.name,
@@ -80,10 +80,26 @@ class Operation:
                 "is_data": self.is_data
             }
         )
-        self.db_id = response.json()["id"]
+
+        # Error handling
+        if response.status_code != 200:
+            raise Exception(
+                f"Failed to create operation. "
+                f"Status: {response.status_code}, "
+                f"Response: {response.text}"
+            )
+
+        response_data = response.json()
+        if "id" not in response_data:
+            raise Exception(
+                f"Unexpected response format. "
+                f"Expected 'id' field, got: {response_data}"
+            )
+
+        self.db_id = response_data["id"]
         self.storage_address = f"/storage/operations/{self.db_id}"
         requests.patch(
-            url=f'{LOG_SERVER_URL}/operations/{self.db_id}',
+            url=f'{LOG_SERVER_URL}/api/operations/{self.db_id}',
             data={
                 "attribute": "storage_address",
                 "new_value": self.storage_address
@@ -97,14 +113,14 @@ class Operation:
         storage_path = Path(self.storage_address)
         storage_path.mkdir(parents=True, exist_ok=True)
         requests.patch(
-            url=f'{LOG_SERVER_URL}/operations/{self.db_id}',
+            url=f'{LOG_SERVER_URL}/api/operations/{self.db_id}',
             data={
                 "attribute": "started_at",
                 "new_value": self.started_at
             }
         )
         requests.patch(
-            url=f'{LOG_SERVER_URL}/operations/{self.db_id}',
+            url=f'{LOG_SERVER_URL}/api/operations/{self.db_id}',
             data={
                 "attribute": "status",
                 "new_value": self.status
@@ -119,21 +135,21 @@ class Operation:
         with open(storage_path / "log.txt", "r") as f:
             log = f.read()
             requests.patch(
-                url=f'{LOG_SERVER_URL}/operations/{self.db_id}',
+                url=f'{LOG_SERVER_URL}/api/operations/{self.db_id}',
                 data={
                     "attribute": "log",
                     "new_value": log
                 }
             )
         requests.patch(
-            url=f'{LOG_SERVER_URL}/operations/{self.db_id}',
+            url=f'{LOG_SERVER_URL}/api/operations/{self.db_id}',
             data={
                 "attribute": "finished_at",
                 "new_value": self.finished_at
             }
         )
         requests.patch(
-            url=f'{LOG_SERVER_URL}/operations/{self.db_id}',
+            url=f'{LOG_SERVER_URL}/api/operations/{self.db_id}',
             data={
                 "attribute": "status",
                 "new_value": self.status
@@ -156,17 +172,33 @@ class Process:
 
     def post(self):
         response = requests.post(
-            url=f'{LOG_SERVER_URL}/processes/',
+            url=f'{LOG_SERVER_URL}/api/processes/',
             data={
                 "name": self.id_in_protocol,
                 "run_id": self.run_id,
                 "storage_address": ""
             }
         )
-        self.db_id = response.json()["id"]
+
+        # Error handling
+        if response.status_code != 200:
+            raise Exception(
+                f"Failed to create process. "
+                f"Status: {response.status_code}, "
+                f"Response: {response.text}"
+            )
+
+        response_data = response.json()
+        if "id" not in response_data:
+            raise Exception(
+                f"Unexpected response format. "
+                f"Expected 'id' field, got: {response_data}"
+            )
+
+        self.db_id = response_data["id"]
         self.storage_address = f"/storage/processes/{self.db_id}"
         requests.patch(
-            url=f'{LOG_SERVER_URL}/processes/{self.db_id}',
+            url=f'{LOG_SERVER_URL}/api/processes/{self.db_id}',
             data={
                     "attribute": "storage_address",
                     "new_value": self.storage_address
@@ -273,7 +305,7 @@ def create_process_and_operation_and_edge(run_id, protocol_dict, machines):
 
     for edge in edge_db_id_list:
         response = requests.post(
-            url=f'{LOG_SERVER_URL}/edges/',
+            url=f'{LOG_SERVER_URL}/api/edges/',
             data={
                 "run_id": run_id,
                 "from_id": edge["from"],
@@ -352,7 +384,7 @@ async def run_experiment(project_id: int, protocol_name, user_id: int, protocol_
     ]
 
     response = requests.post(
-        url=f'{LOG_SERVER_URL}/runs/',
+        url=f'{LOG_SERVER_URL}/api/runs/',
         data={
             "project_id": project_id,
             "file_name": protocol_name,
@@ -361,7 +393,22 @@ async def run_experiment(project_id: int, protocol_name, user_id: int, protocol_
             "storage_address": storage_address
         }
     )
-    run_id = response.json()["id"]
+
+    # Error handling
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"Failed to create run. Log server response: {response.text}"
+        )
+
+    response_data = response.json()
+    if "id" not in response_data:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected response format from log server. Expected 'id' field, got: {response_data}"
+        )
+
+    run_id = response_data["id"]
     operation_list, edge_list = create_process_and_operation_and_edge(
         run_id=run_id,
         protocol_dict=protocol,
@@ -369,11 +416,11 @@ async def run_experiment(project_id: int, protocol_name, user_id: int, protocol_
     )
     plan = create_plan(edge_list)
     run_start_time = datetime.now().isoformat()
-    requests.patch(url=f'{LOG_SERVER_URL}/runs/{run_id}', data={"attribute": "started_at", "new_value": run_start_time})
-    requests.patch(url=f'{LOG_SERVER_URL}/runs/{run_id}', data={"attribute": "status", "new_value": "running"})
+    requests.patch(url=f'{LOG_SERVER_URL}/api/runs/{run_id}', data={"attribute": "started_at", "new_value": run_start_time})
+    requests.patch(url=f'{LOG_SERVER_URL}/api/runs/{run_id}', data={"attribute": "status", "new_value": "running"})
     for operation_name in plan:
         operation = [operation for operation in operation_list if operation.name == operation_name][0]
         operation.run()
     run_finish_time = datetime.now().isoformat()
-    requests.patch(url=f'{LOG_SERVER_URL}/runs/{run_id}', data={"attribute": "finished_at", "new_value": run_finish_time})
-    requests.patch(url=f'{LOG_SERVER_URL}/runs/{run_id}', data={"attribute": "status", "new_value": "completed"})
+    requests.patch(url=f'{LOG_SERVER_URL}/api/runs/{run_id}', data={"attribute": "finished_at", "new_value": run_finish_time})
+    requests.patch(url=f'{LOG_SERVER_URL}/api/runs/{run_id}', data={"attribute": "status", "new_value": "completed"})
